@@ -1,7 +1,7 @@
 # 🛡️ أداة الظل (shadow-tool) - النسخة التجريبية الثانية
 
 <p align="center">
-  <img src="assets/banner.png" alt="AlZill Banner" width="600">
+  <img src="assets/banner.png" alt="shadow-tool" width="600">
 </p>
 
 ```text
