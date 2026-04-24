@@ -1,10 +1,8 @@
 # 🛡️ أداة الظل (shadow-tool) - النسخة التجريبية الثانية
 
-<p align="center">
-  <img src="https://i.postimg.cc/05X42p3f/banner.png" width="100%">
-</p>
-https://i.postimg.cc/05X42p3f/banner.png
-[![banner.png](https://i.postimg.cc/05X42p3f/banner.png)](https://postimg.cc/mhMjmFTz)
+# صورتي في المستودع
+
+![shadow-tool](assets/banner.png)
 
     ____  _               _                 _              _ 
  / ___|| |__   __ _  __| | _____      __ | |_ ___   ___ | |
