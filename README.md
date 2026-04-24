@@ -1,4 +1,4 @@
-# 🛡️ أداة الظل (AlZill) - النسخة التجريبية الثانية
+# 🛡️ أداة الظل (shadow-tool) - النسخة التجريبية الثانية
 
 <p align="center">
   <img src="assets/banner.png" alt="AlZill Banner" width="600">
