@@ -1,12 +1,9 @@
 # 🛡️ أداة الظل (shadow-tool) - النسخة التجريبية الثانية
 
 <p align="center">
-  <img src="assets/banner.png" alt="shadow-tool" width="600">
+  <img src="https://raw.githubusercontent.com/surrye2/shadow-tool/master/assets/banner.png" width="100%">
 </p>
 
-```text
-  
-  
     ____  _               _                 _              _ 
  / ___|| |__   __ _  __| | _____      __ | |_ ___   ___ | |
  \___ \| '_ \ / _` |/ _` |/ _ \ \ /\ / / | __/ _ \ / _ \| |
