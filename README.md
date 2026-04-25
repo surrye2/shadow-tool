@@ -2,7 +2,7 @@
 
 ![shadow tool](assets/banner.png)
 
-![shadow tool](assets/shadow%20tool.jpg)
+[Shadow Tool](https://raw.githubusercontent.com/username/Shadow-tool/main/assets/myimage.png)
      
   
   
