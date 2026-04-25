@@ -2,7 +2,7 @@
 
 ![shadow tool](assets/banner.png)
 
-![shadow tool](assets/shadow%20tool.png)
+![shadow tool](assets/shadow%20tool.jpg)
      
   
   
