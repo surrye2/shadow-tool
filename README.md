@@ -2,7 +2,7 @@
 
 # صورتي في المستودع
 
-![PicsArt_22-05-29_10-48-11-232](https://user-images.githubusercontent.com/70594016/170853488-00bb3f9c-768b-4313-83ba-535683a75c82.png)
+![PicsArt_22-05-29_10-48-11-232](https://i.postimg.cc/05X42p3f/banner.png)
 
 
 
